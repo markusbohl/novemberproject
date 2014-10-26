@@ -1,0 +1,89 @@
+---
+title: "Git Fork Charts"
+output: pdf_document
+---
+
+Find the most active version(s) of a GitHub project fork by analyzing the number of commits.
+
+```{r}
+library(httr)
+library(httpuv)
+library(jsonlite)
+
+# Define some functions first
+
+# Function registers an application with github and returns the
+# appropriate OAuth credentials
+getGitHubOAuthToken <- function(key, secret=NULL) {
+    # Register an application with github and look it up with 
+    # the credentials provided
+    myapp <- oauth_app("github", key = key, secret = secret)
+    
+    # Get OAuth credentials
+    token <- oauth2.0_token(oauth_endpoints("github"), myapp)
+    
+    return(token)
+}
+
+# Function extracts the content from a HTTP GET request
+contentFromGET <- function(url, config) {
+    req <- GET(url, config)
+    stop_for_status(req)
+    
+    return(content(req))
+}
+
+countCommits <- function(commit_url, config) {
+    content <- contentFromGET(cleanUrl(commit_url), config)
+    print(content)
+    commits_json <- fromJSON(toJSON(content))
+    
+    return(nrow(commits_json))
+}
+
+cleanUrl <- function(dirty_url) {
+    clean_url <- gsub("\\{.*\\}", replacement = "", x = dirty_url)
+    
+    return(clean_url)
+}
+
+################
+
+# Read Client Id and Client Secret for my github application
+github_props <- read.table("github_application.properties", 
+                           header = FALSE,
+                           sep = "=",
+                           row.names = 1,
+                           strip.white = TRUE,
+                           stringsAsFactors = FALSE)
+
+# Get OAuth credentials
+github_token <- getGitHubOAuthToken(github_props[["clientId", 1]], 
+                                    github_props[["clientSecret", 1]])
+
+
+# Let's start with the following url as an example
+list_forks_url <- "https://api.github.com/repos/denniskaselow/dartemis/forks"
+
+# Query github with token
+gtoken <- config(token = github_token)
+forks_content <- contentFromGET(list_forks_url, gtoken)
+
+# Read JSON from response
+forks_json <- fromJSON(toJSON(forks_content))
+
+# Prepare data frame for the results
+df <- data.frame(html_url = unlist(forks_json["html_url"]), 
+                 commits_url = unlist(forks_json["commits_url"]))
+
+# Add the number of commits to the data frame
+df$commit_count <- apply(df, 1, function(x) countCommits(x["commits_url"], gtoken))
+
+```
+
+```{r}
+library(ggplot2)
+library(ggthemes)
+
+ggplot(data=df, aes(x=html_url, y=commit_count)) + geom_bar(stat="identity")
+```
